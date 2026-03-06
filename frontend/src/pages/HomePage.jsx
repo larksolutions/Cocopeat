@@ -1,124 +1,126 @@
-import Navbar from "../components/Navbar";
-import { useState, useEffect, useMemo, useRef } from "react"; // <-- Import useRef
-import RateLimitedUI from "../components/RateLimitedUI";
-import { toast } from "react-hot-toast";
-import BatchCard from "../components/BatchCard";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Link } from "react-router"; 
+import { PlusIcon, LoaderIcon, AlertTriangleIcon, Wifi, WifiOff, ChevronLeft, ChevronRight } from "lucide-react"; 
+import toast from "react-hot-toast";
 import api from "../lib/axios";
-import NotFound from "../components/NotFound";
-import { LoaderIcon } from "lucide-react"; // <-- Import loader
 
-// --- This component is needed for the dashboard ---
-const SupplyStatus = ({ label, level }) => {
-    const isLow = level === 0; // 0 = Low, 1 = Sufficient
-    const statusText = isLow ? 'Low' : 'Sufficient';
-    const colorClass = isLow ? 'text-error' : 'text-success';
-
-    return (
-        <div className="flex justify-between items-center p-4 bg-base-100 rounded-lg shadow">
-            <span className="label-text font-medium">{label}</span>
-            <span className={`font-bold ${colorClass} badge badge-outline badge-lg`}>{statusText}</span>
-        </div>
-    );
-};
-
-const ESPConnectionStatus = ({ espStatus }) => {
-    if (!espStatus) {
-        return (
-            <div className="p-4 bg-base-100 rounded-lg shadow">
-                <div className="flex justify-between items-center">
-                    <span className="label-text font-medium">ESP32 Connection</span>
-                    <span className="badge badge-outline badge-lg text-warning">Checking...</span>
-                </div>
-            </div>
-        );
-    }
-
-    const { isConnected, wifiSSID, wifiRSSI, ipAddress, timeSinceLastHeartbeat } = espStatus;
-    const statusText = isConnected ? 'Connected' : 'Offline';
-    const colorClass = isConnected ? 'text-success' : 'text-error';
-    
-    // Signal strength indicator
-    const getSignalStrength = (rssi) => {
-        if (rssi >= -50) return 'Excellent';
-        if (rssi >= -60) return 'Good';
-        if (rssi >= -70) return 'Fair';
-        return 'Weak';
-    };
-
-    return (
-        <div className="p-4 bg-base-100 rounded-lg shadow">
-            <div className="flex justify-between items-center mb-2">
-                <span className="label-text font-medium">ESP32 Connection</span>
-                <span className={`font-bold ${colorClass} badge badge-outline badge-lg`}>{statusText}</span>
-            </div>
-            {isConnected && (
-                <div className="text-xs text-base-content/60 space-y-1">
-                    <div className="flex justify-between">
-                        <span>WiFi:</span>
-                        <span className="font-mono">{wifiSSID || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                        <span>Signal:</span>
-                        <span className="font-mono">{wifiRSSI ? `${wifiRSSI} dBm (${getSignalStrength(wifiRSSI)})` : 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                        <span>IP:</span>
-                        <span className="font-mono">{ipAddress || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                        <span>Last seen:</span>
-                        <span className="font-mono">{timeSinceLastHeartbeat ? `${timeSinceLastHeartbeat}s ago` : 'Just now'}</span>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-// ---
-
-function HomePage() {
-  const [isRateLimited, setIsRateLimited] = useState(false);
-  const [batches, setBatches] = useState([]); 
-  const [machineState, setMachineState] = useState(null); 
-  const [espStatus, setEspStatus] = useState(null); // <-- ESP connection status
-  const [loadingBatches, setLoadingBatches] = useState(true); // <-- Split loading state
-  const [loadingState, setLoadingState] = useState(true); // <-- Split loading state
-  
-  const pollingRef = useRef(null); // <-- Add ref for polling
-  const previousActiveBatchIdRef = useRef(null); // <-- Track previous active batch ID
-
-  // --- Fetch Batch History Function (can be called multiple times) ---
-  const fetchBatchHistory = async () => {
-    try {
-      const batchRes = await api.get("/batch");
-      setBatches(batchRes.data);
-      setIsRateLimited(false);
-    } catch (error) {
-      console.error("Error fetching batch history:", error);
-      if (error.response && error.response.status === 429) {
-        setIsRateLimited(true);
-      } else {
-        toast.error("Failed to load batch history");
-      }
+const Navbar = ({ isBatchActive, areSuppliesLow }) => {
+  const isDisabled = isBatchActive || areSuppliesLow;
+  const handleNewBatchClick = (e) => {
+    if (isDisabled) {
+      e.preventDefault();
+      toast.error(isBatchActive ? "Batch in progress!" : "Supplies Low!", { duration: 3000 });
     }
   };
 
-  // --- Effect 1: Fetch Batch History (ONCE on mount) ---
+  return (
+    <header className="h-9 bg-neutral text-neutral-content px-3 flex justify-between items-center shadow-md z-10 shrink-0">
+      <h1 className="text-lg font-black tracking-tight">POT-O-MATIC</h1>
+      <Link
+        to={"/create"}
+        className={`btn btn-xs btn-primary h-7 px-3 ${isDisabled ? "btn-disabled opacity-50" : ""}`}
+        onClick={handleNewBatchClick}
+      >
+        <PlusIcon className="size-4 mr-1" /> 
+        <span className="font-bold text-[11px]">NEW BATCH</span>
+      </Link>
+    </header>
+  );
+};
+
+const SupplyStatus = ({ label, level }) => {
+  const isLow = level === 0; 
+  const dotClass = isLow ? "bg-error animate-pulse shadow-[0_0_8px_rgba(255,0,0,0.6)]" : "bg-success shadow-[0_0_8px_rgba(0,255,0,0.4)]";
+  return (
+    <div className={`flex flex-col items-center justify-center p-1.5 bg-base-100 rounded-lg shadow-sm border ${isLow ? 'border-error/40 bg-error/5' : 'border-base-200/50'}`}>
+      <div className={`w-5 h-5 rounded-full mb-1 border-2 border-base-100 ${dotClass}`}></div>
+      <span className="text-[9px] font-extrabold uppercase tracking-widest text-base-content/70 leading-none">{label}</span>
+    </div>
+  );
+};
+
+const ESPConnectionStatus = ({ espStatus }) => {
+  const isConnected = espStatus?.isConnected;
+  const dotClass = isConnected ? "bg-success shadow-[0_0_8px_rgba(0,255,0,0.4)]" : "bg-error animate-pulse shadow-[0_0_8px_rgba(255,0,0,0.6)]";
+  return (
+    <div className="flex flex-col items-center justify-center p-1.5 bg-base-100 rounded-lg shadow-sm border border-base-200/50">
+      <div className={`flex items-center justify-center w-5 h-5 rounded-full mb-1 border-2 border-base-100 ${dotClass}`}>
+        {isConnected ? <Wifi className="size-3 text-success-content" /> : <WifiOff className="size-3 text-error-content" />}
+      </div>
+      <span className="text-[9px] font-extrabold uppercase tracking-widest text-base-content/70 leading-none">WIFI</span>
+    </div>
+  );
+};
+
+const BatchCard = ({ batch, isCurrentlyPausedBySupply }) => {
+  const progress = batch.outputCount > 0 ? (batch.potsDoneCount / batch.outputCount) * 100 : 0;
+  
+  // UI Logic: If machine is physically paused by supply, show Paused regardless of DB status
+  const effectiveStatus = isCurrentlyPausedBySupply ? 'Paused' : batch.status;
+
+  const getStatusColor = (status) => {
+    if (status === 'Ongoing') return 'bg-info text-info-content';
+    if (status === 'Paused') return 'bg-warning text-warning-content animate-pulse shadow-sm';
+    if (status === 'Finished') return 'bg-success text-success-content';
+    return 'bg-base-300';
+  };
+
+  return (
+    <Link
+      to={`/batch/${batch._id}`}
+      className="block bg-base-100 rounded-lg shadow-sm p-2 border-l-4 border-primary h-[52px] active:scale-[0.99] transition-transform"
+    >
+      <div className="flex justify-between items-center mb-1">
+        <span className="font-bold text-sm truncate pr-2 text-base-content">{batch.title}</span>
+        <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${getStatusColor(effectiveStatus)}`}>
+          {effectiveStatus}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <progress className="progress progress-primary flex-1 h-2 bg-base-300" value={progress} max="100"></progress>
+        <span className="text-[11px] font-mono font-bold w-10 text-right">{batch.potsDoneCount}/{batch.outputCount}</span>
+      </div>
+    </Link>
+  );
+};
+
+function HomePage() {
+  const [batches, setBatches] = useState([]); 
+  const [machineState, setMachineState] = useState(null); 
+  const [espStatus, setEspStatus] = useState(null); 
+  const [loadingBatches, setLoadingBatches] = useState(true); 
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 2; 
+  const totalPages = Math.ceil(batches.length / ITEMS_PER_PAGE) || 1;
+  
+  const pollingRef = useRef(null); 
+  const previousActiveBatchIdRef = useRef(null);
+
+  const fetchBatchHistory = async () => {
+    try {
+      const batchRes = await api.get("/batch");
+      if (Array.isArray(batchRes.data)) setBatches(batchRes.data);
+    } catch (error) {
+      console.error("Error fetching batch history:", error);
+    }
+  };
+
   useEffect(() => {
-    const loadInitialBatches = async () => {
+    const init = async () => {
       setLoadingBatches(true);
       await fetchBatchHistory();
       setLoadingBatches(false);
     };
+    init();
 
-    loadInitialBatches();
-  }, []); // Empty array, runs only once on mount
-
-  // --- Effect 2: Fetch Machine State + ESP Status + Set up Polling ---
-  useEffect(() => {
-    const fetchMachineState = async () => {
+    const poll = async () => {
       try {
-        const stateRes = await api.get("/batch/machine-state"); // <-- New API call
+        const [stateRes, espRes] = await Promise.all([
+          api.get("/batch/machine-state"),
+          api.get("/batch/esp-status")
+        ]);
+        
         const newMachineState = stateRes.data;
         
         // Check if batch status changed (from active to inactive)
@@ -136,108 +138,81 @@ function HomePage() {
         previousActiveBatchIdRef.current = currentBatchId;
         
         setMachineState(newMachineState);
-      } catch (error) {
-        console.error("Error polling machine state:", error);
-        // We don't show a toast on polling errors, it gets annoying
-      } finally {
-        setLoadingState(false);
-      }
-    };
-
-    const fetchESPStatus = async () => {
-      try {
-        const espRes = await api.get("/batch/esp-status");
         setEspStatus(espRes.data);
       } catch (error) {
-        console.error("Error polling ESP status:", error);
+        console.error("Error polling:", error);
       }
     };
 
-    const pollAll = async () => {
-      await Promise.all([fetchMachineState(), fetchESPStatus()]);
-    };
-
-    pollAll(); // Run once immediately
-    
-    // Set up the polling interval
-    pollingRef.current = setInterval(pollAll, 3000); // Polls every 3 seconds
-
-    // Cleanup function:
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
-  }, []); // Empty array, runs once to set up polling
-
-  // --- Memos (now update in real-time) ---
-  const isBatchActive = useMemo(() => {
-    // Check if there's an active batch ID AND it's not null/empty
-    if (!machineState || !machineState.activeBatchId) {
-      return false;
-    }
-    
-    // Additional safety check: verify the batch actually exists and is active
-    const activeBatch = batches.find(b => b._id === machineState.activeBatchId);
-    if (activeBatch) {
-      // Only consider it active if status is Ongoing or Paused
-      return activeBatch.status === 'Ongoing' || activeBatch.status === 'Paused';
-    }
-    
-    // If we have an activeBatchId but can't find the batch in our list,
-    // assume it's active (batch list might not be updated yet)
-    return true;
-  }, [machineState, batches]);
+    poll();
+    pollingRef.current = setInterval(poll, 3000);
+    return () => clearInterval(pollingRef.current);
+  }, []);
 
   const areSuppliesLow = useMemo(() => {
-    if (!machineState) return true; // Default to 'low' (disabled) while loading
-    return machineState.soilLevel === 0 || machineState.cupLevel === 0;
+    if (!machineState) return false; 
+    return machineState.cupLevel === 0 || machineState.seedLevel === 0 || 
+           machineState.cocoLevel === 0;
   }, [machineState]);
 
+  const isBatchActive = useMemo(() => {
+    if (!machineState || !machineState.activeBatchId) return false;
+    const active = batches.find(b => b._id === machineState.activeBatchId);
+    return active ? (active.status === 'Ongoing' || active.status === 'Paused') : true;
+  }, [machineState, batches]);
+
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const currentBatches = batches.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
   return (
-    <div className="min-h-screen bg-base-200">
-      <Navbar 
-        isBatchActive={isBatchActive} 
-        areSuppliesLow={areSuppliesLow} 
-      />
+    <div className="h-screen w-screen flex flex-col bg-base-200 overflow-hidden select-none">
+      <Navbar isBatchActive={isBatchActive} areSuppliesLow={areSuppliesLow} />
 
-      {isRateLimited && <RateLimitedUI />}
-
-      <div className="max-w-7xl mx-auto p-4 mt-6">
+      <div className="flex-1 flex flex-col p-1.5 gap-1.5 overflow-hidden">
         
-        {/* --- ADDED: Machine State Dashboard --- */}
-        <div className="mb-6">
-            <h2 className="text-2xl font-bold mb-4">Machine Status</h2>
-            {/* --- This section now updates every 3 seconds --- */}
-            {loadingState ? (
-                <div className="text-center"><LoaderIcon className="animate-spin size-6" /></div>
-            ) : machineState ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <SupplyStatus label="Soil Supply Level" level={machineState.soilLevel} />
-                    <SupplyStatus label="Potting Cup Supply Level" level={machineState.cupLevel} />
-                    <ESPConnectionStatus espStatus={espStatus} />
-                </div>
-            ) : (
-                <div className="text-center text-error">Could not load machine status.</div>
-            )}
-        </div>
-        
-        <h2 className="text-2xl font-bold mb-4">Batch History</h2>
-
-        {/* --- This section only loads once --- */}
-        {loadingBatches && (
-          <div className="text-center py-10"><LoaderIcon className="animate-spin size-6" /></div>
-        )}
-
-        {batches.length === 0 && !loadingBatches && !isRateLimited && <NotFound />}
-
-        {batches.length > 0 && !isRateLimited && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {batches.map((batch) => (
-              <BatchCard key={batch._id} batch={batch} setBatch={setBatches}/>
-            ))}
+        {/* Banner Alert Injection */}
+        {areSuppliesLow && (
+          <div className="bg-error text-error-content p-2 rounded-lg flex items-center justify-center gap-2 animate-pulse shadow-md shrink-0">
+            <AlertTriangleIcon className="size-4" />
+            <span className="font-bold text-[10px] uppercase tracking-wider leading-none">Refill Required</span>
           </div>
         )}
+
+        <div className="bg-base-300/50 rounded-xl p-1.5 shrink-0">
+          <div className="flex items-center justify-between mb-1.5 px-1">
+            <h2 className="text-sm font-black text-base-content/80 uppercase tracking-tight">System Status</h2>
+          </div>
+          {machineState ? (
+            <div className="grid grid-cols-4 gap-1.5 h-[50px]">
+              <SupplyStatus label="Cups" level={machineState.cupLevel} />
+              <SupplyStatus label="Seed" level={machineState.seedLevel} />
+              <SupplyStatus label="Coco" level={machineState.cocoLevel} />
+              <ESPConnectionStatus espStatus={espStatus} />
+            </div>
+          ) : (
+            <div className="flex justify-center p-2"><LoaderIcon className="animate-spin size-6" /></div>
+          )}
+        </div>
+        
+        <div className="flex-1 flex flex-col bg-base-300/50 rounded-xl p-1.5 overflow-hidden">
+          <div className="flex items-center justify-between mb-1.5 px-1 shrink-0 h-8">
+            <button className="btn btn-neutral btn-sm h-full w-12 min-h-0 rounded active:scale-95" disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)}><ChevronLeft className="size-5" /></button>
+            <h2 className="text-xs font-black text-base-content/80 text-center leading-tight uppercase tracking-tight">History <br/><span className="text-[9px] opacity-70 tracking-wider">P. {currentPage}/{totalPages}</span></h2>
+            <button className="btn btn-neutral btn-sm h-full w-12 min-h-0 rounded active:scale-95" disabled={currentPage === totalPages || batches.length === 0} onClick={() => setCurrentPage(prev => prev + 1)}><ChevronRight className="size-5" /></button>
+          </div>
+          <div className="flex-1 flex flex-col gap-1.5">
+            {currentBatches.map((batch) => (
+              <BatchCard 
+                key={batch._id} 
+                batch={batch} 
+                isCurrentlyPausedBySupply={areSuppliesLow && machineState?.activeBatchId === batch._id}
+              />
+            ))}
+            {!loadingBatches && currentBatches.length === 0 && (
+               <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-xs">No records</div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

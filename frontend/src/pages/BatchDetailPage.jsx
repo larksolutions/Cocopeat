@@ -1,279 +1,140 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router";
 import { 
-    LoaderIcon, 
-    ArrowLeftIcon, 
-    Trash2Icon, 
-    AlertTriangleIcon, 
-    PauseCircleIcon, 
-    PlayCircleIcon, 
-    CheckCircle2Icon,
-    XCircleIcon
+  LoaderIcon, ArrowLeftIcon, Trash2Icon, AlertTriangleIcon, 
+  PauseCircleIcon, PlayCircleIcon, CheckCircle2Icon, XCircleIcon
 } from "lucide-react";
-import api from "../lib/axios";
 import toast from "react-hot-toast";
+import api from "../lib/axios"
 
-// --- Helper UI Components ---
+const StatusBadge = ({ status, isPausedBySupply }) => {
+  const displayStatus = isPausedBySupply ? 'Paused' : status;
+  const config = {
+    Ongoing: { icon: <PlayCircleIcon className="size-3 mr-1" />, text: 'RUNNING', color: 'bg-info text-info-content' },
+    Paused: { icon: <PauseCircleIcon className="size-3 mr-1" />, text: 'PAUSED', color: 'bg-warning text-warning-content animate-pulse shadow-md' },
+    Finished: { icon: <CheckCircle2Icon className="size-3 mr-1" />, text: 'FINISHED', color: 'bg-success text-success-content' },
+    Cancelled: { icon: <XCircleIcon className="size-3 mr-1" />, text: 'STOPPED', color: 'bg-base-300 text-base-content' },
+  }[displayStatus] || { icon: null, text: 'UNKNOWN', color: 'bg-ghost' };
 
-const ProgressBar = ({ value, colorClass = 'progress-primary' }) => (
-    <progress className={`progress ${colorClass} w-full`} value={value} max="100"></progress>
-);
-
-const StatusBadge = ({ status }) => {
-    const statusConfig = {
-        Ongoing: { icon: <PlayCircleIcon className="h-5 w-5 mr-2" />, text: 'Ongoing', color: 'info' },
-        Paused: { icon: <PauseCircleIcon className="h-5 w-5 mr-2" />, text: 'Paused', color: 'warning' },
-        Finished: { icon: <CheckCircle2Icon className="h-5 w-5 mr-2" />, text: 'Finished', color: 'success' },
-        Cancelled: { icon: <XCircleIcon className="h-5 w-5 mr-2" />, text: 'Cancelled', color: 'ghost' },
-        default: { icon: null, text: 'Unknown', color: 'ghost' }
-    };
-    const config = statusConfig[status] || statusConfig.default;
-    return (
-        <div className={`badge badge-lg badge-${config.color} gap-2 p-4`}>
-            {config.icon}
-            <span className="font-semibold">{config.text}</span>
-        </div>
-    );
+  return (
+    <div className={`flex items-center px-2 py-1 rounded shadow-sm ${config.color}`}>
+      {config.icon}
+      <span className="font-black text-[10px] tracking-wider leading-none">{config.text}</span>
+    </div>
+  );
 };
 
-// --- LowSupplyAlert now just reads the batch status ---
-const LowSupplyAlert = ({ status }) => {
-    if (status !== 'Paused') {
-        return null; 
-    }
-
-    return (
-        <div className="alert alert-error shadow-lg mb-6 animate-pulse">
-            <AlertTriangleIcon className="h-6 w-6 stroke-current shrink-0" />
-            <div>
-                <h3 className="font-bold">Critical Alert: Supplies Low!</h3>
-                <div className="text-xs">
-                    The process is paused. Please refill supplies to resume.
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// --- SupplyStatus component (reads from machineState) ---
 const SupplyStatus = ({ label, level }) => {
-    const isLow = level === 0;
-    const statusText = isLow ? 'Low' : 'Sufficient';
-    const colorClass = isLow ? 'text-error' : 'text-success';
-
-    return (
-        <div className="flex justify-between items-center p-4 bg-base-200 rounded-lg">
-            <span className="label-text font-medium">{label}</span>
-            <span className={`font-bold ${colorClass} badge badge-outline badge-lg`}>{statusText}</span>
-        </div>
-    );
+  const isLow = level === 0;
+  const dotClass = isLow ? "bg-error animate-pulse shadow-[0_0_5px_rgba(255,0,0,0.5)]" : "bg-success shadow-[0_0_5px_rgba(0,255,0,0.3)]";
+  return (
+    <div className={`flex flex-col items-center justify-center p-1 bg-base-200 rounded-lg border ${isLow ? 'border-error/40' : 'border-base-300'}`}>
+      <div className={`w-4 h-4 rounded-full mb-0.5 border-2 border-base-100 ${dotClass}`}></div>
+      <span className="text-[9px] font-extrabold uppercase tracking-wider text-base-content/70 leading-tight">{label}</span>
+    </div>
+  );
 };
 
+const FullScreenConfirm = ({ isOpen, title, message, confirmText, confirmColor, onConfirm, onCancel, isLoading }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="absolute inset-0 z-50 bg-base-300/95 flex flex-col p-3 justify-center backdrop-blur-sm">
+      <div className="flex flex-col items-center text-center mb-4">
+        <AlertTriangleIcon className={`size-10 mb-2 ${confirmColor === 'btn-error' ? 'text-error' : 'text-warning'}`} />
+        <h2 className="text-xl font-black mb-1 leading-tight">{title}</h2>
+        <p className="text-xs text-base-content/80 font-bold leading-tight">{message}</p>
+      </div>
+      <div className="flex flex-row gap-2">
+        <button className="btn btn-neutral flex-1 h-12 min-h-0 text-xs font-black active:scale-95" onClick={onCancel} disabled={isLoading}>GO BACK</button>
+        <button className={`btn ${confirmColor} flex-1 h-12 min-h-0 text-xs font-black shadow-md active:scale-95`} onClick={onConfirm} disabled={isLoading}>{isLoading ? <LoaderIcon className="animate-spin size-5" /> : confirmText}</button>
+      </div>
+    </div>
+  );
+};
 
-// --- Main Page Component ---
 const BatchDetailPage = () => {
-    const [batch, setBatch] = useState(null);
-    const [machineState, setMachineState] = useState(null); 
-    const [loading, setLoading] = useState(true);
-    const [isCancelling, setIsCancelling] = useState(false);
-    const navigate = useNavigate();
-    const { id } = useParams();
-    const pollingRef = useRef(null);
+  const [batch, setBatch] = useState(null);
+  const [machineState, setMachineState] = useState(null); 
+  const [loading, setLoading] = useState(true);
+  const [showDelete, setShowDelete] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const pollingRef = useRef(null);
 
-    useEffect(() => {
-        const fetchBatchData = async () => {
-            try {
-                const batchRes = await api.get(`/batch/${id}`);
-                const stateRes = await api.get(`/batch/machine-state`); 
-
-                setBatch(batchRes.data);
-                setMachineState(stateRes.data);
-                
-                if ((batchRes.data.status === 'Finished' || batchRes.data.status === 'Cancelled') && pollingRef.current) {
-                    clearInterval(pollingRef.current);
-                }
-            } catch (error) {
-                console.error("Error fetching data", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchBatchData(); // Initial fetch
-        pollingRef.current = setInterval(fetchBatchData, 3000); // Polling
-
-        return () => {
-            if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-            }
-        };
-    }, [id]);
-
-    const handleDelete = async () => {
-        document.getElementById('delete_modal').showModal();
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [batchRes, stateRes] = await Promise.all([
+          api.get(`/batch/${id}`),
+          api.get(`/batch/machine-state`)
+        ]);
+        setBatch(batchRes.data);
+        setMachineState(stateRes.data);
+        if (['Finished', 'Cancelled'].includes(batchRes.data.status)) clearInterval(pollingRef.current);
+      } catch (e) {} finally { setLoading(false); }
     };
 
-    const confirmDelete = async () => {
-       try {
-            await api.delete(`/batch/${id}`);
-            toast.success("Batch deleted successfully");
-            navigate("/");
-        } catch (error) {
-            console.error("Error deleting the Batch", error);
-            toast.error(error.response?.data?.message || "Failed to delete the Batch");
-        }
-    }
+    fetchData();
+    pollingRef.current = setInterval(fetchData, 3000);
+    return () => clearInterval(pollingRef.current);
+  }, [id]);
 
-    const handleCancel = async () => {
-        document.getElementById('cancel_modal').showModal();
-    };
+  if (loading || !batch || !machineState) return <div className="h-screen w-screen bg-base-200 flex items-center justify-center"><LoaderIcon className="animate-spin size-10 text-primary" /></div>;
 
-    const confirmCancel = async () => {
-        setIsCancelling(true);
-        try {
-            await api.put(`/batch/${id}/cancel`); 
-            toast.success("Batch cancelled successfully");
-        } catch (error) {
-            console.error("Error cancelling the Batch", error);
-            toast.error("Failed to cancel the Batch");
-        } finally {
-            setIsCancelling(false);
-            const modal = document.getElementById('cancel_modal');
-            if (modal) {
-                modal.close();
-            }
-        }
-    };
+  const progress = batch.outputCount > 0 ? (batch.potsDoneCount / batch.outputCount) * 100 : 0;
+  const isLowSupply = machineState.soilLevel === 0 || machineState.cupLevel === 0;
 
-    if (loading || !machineState) { 
-        return (
-            <div className="min-h-screen bg-base-200 flex items-center justify-center">
-                <LoaderIcon className="animate-spin size-10 text-primary" />
-            </div>
-        );
-    }
+  return (
+    <div className="h-screen w-screen bg-base-200 flex flex-col overflow-hidden select-none relative">
+      <FullScreenConfirm isOpen={showDelete} title="DELETE BATCH?" message="This action cannot be undone." confirmText="YES, DELETE" confirmColor="btn-error" onConfirm={async () => { setIsProcessing(true); try { await api.delete(`/batch/${id}`); navigate("/"); } catch (e) { setIsProcessing(false); setShowDelete(false); } }} onCancel={() => setShowDelete(false)} isLoading={isProcessing} />
+      <FullScreenConfirm isOpen={showCancel} title="EMERGENCY STOP" message="Halt machine immediately?" confirmText="YES, STOP" confirmColor="btn-warning" onConfirm={async () => { setIsProcessing(true); try { await api.put(`/batch/${id}/cancel`); setShowCancel(false); } catch (e) {} finally { setIsProcessing(false); } }} onCancel={() => setShowCancel(false)} isLoading={isProcessing} />
 
-    if (!batch) {
-        return (
-             <div className="min-h-screen bg-base-200 flex flex-col items-center justify-center text-center">
-                <h2 className="text-2xl font-bold mb-4">Batch Not Found</h2>
-                <p className="text-gray-500 mb-6">The batch may have been deleted.</p>
-                <Link to="/" className="btn btn-primary">
-                    <ArrowLeftIcon className="h-5 w-5 mr-2" />
-                    Back to All Batches
-                </Link>
-            </div>
-        );
-    }
+      <div className="h-10 flex items-center justify-between px-2 bg-base-100 shadow-sm border-b border-base-300 shrink-0">
+        <Link to="/" className="btn btn-ghost btn-xs h-7 min-h-0 px-1 active:scale-95"><ArrowLeftIcon className="size-4 mr-1" /><span className="font-bold text-xs uppercase">Back</span></Link>
+        <StatusBadge status={batch.status} isPausedBySupply={isLowSupply && (batch.status === 'Ongoing' || batch.status === 'Paused')} />
+      </div>
 
-    const progressPercentage = batch.outputCount > 0 ? (batch.potsDoneCount / batch.outputCount) * 100 : 0;
+      <div className="flex-1 flex flex-col p-1.5 gap-1.5 overflow-hidden">
+        
+        {isLowSupply && !['Finished', 'Cancelled'].includes(batch.status) && (
+          <div className="bg-error text-error-content p-2 rounded-lg flex items-center justify-center gap-2 animate-pulse shadow-md shrink-0 border border-white/20">
+            <AlertTriangleIcon className="size-4 shrink-0" />
+            <span className="font-black text-[10px] uppercase tracking-wider leading-none">Critical: Refill Needed - Process Paused</span>
+          </div>
+        )}
 
-    return (
-        <>
-        <div className="min-h-screen bg-base-200 p-4 sm:p-8">
-            <div className="max-w-4xl mx-auto">
-                <div className="flex items-center justify-between mb-6">
-                    <Link to="/" className="btn btn-ghost">
-                        <ArrowLeftIcon className="h-5 w-5" />
-                        Back
-                    </Link>
-                    
-                    <div className="flex gap-2">
-                        {(batch.status === 'Ongoing' || batch.status === 'Paused') && (
-                            <button 
-                                onClick={handleCancel} 
-                                className="btn btn-warning btn-outline"
-                                disabled={isCancelling}
-                            >
-                                <XCircleIcon className="h-5 w-5" />
-                                {isCancelling ? "Cancelling..." : "Cancel Batch"}
-                            </button>
-                        )}
-                        {machineState.activeBatchId?.toString() !== batch._id && (
-                            <button onClick={handleDelete} className="btn btn-error btn-outline">
-                                <Trash2Icon className="h-5 w-5" />
-                                Delete Batch
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                <div className="card bg-base-100 shadow-xl">
-                    <div className="card-body p-6 md:p-8">
-                        <div className="flex flex-col sm:flex-row justify-between sm:items-start mb-6">
-                            <div>
-                                <h1 className="card-title text-3xl font-bold mb-1">{batch.title}</h1>
-                                <p className="text-gray-500">Seed Type ID: <span className="font-semibold">{batch.seedType}</span></p>
-                            </div>
-                            <div className="mt-4 sm:mt-0">
-                                <StatusBadge status={batch.status} />
-                            </div>
-                        </div>
-
-                        <LowSupplyAlert status={batch.status} />
-
-                        <div className="mb-8">
-                             <label className="label">
-                                <span className="label-text text-lg font-semibold">Overall Progress</span>
-                            </label>
-                            <ProgressBar value={progressPercentage} />
-                            <div className="text-right mt-1 font-mono text-gray-600">
-                                Pots Done: {batch.potsDoneCount} / {batch.outputCount}
-                            </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                           <SupplyStatus label="Soil Supply Level" level={machineState.soilLevel} />
-                           <SupplyStatus label="Potting Cup Supply Level" level={machineState.cupLevel} />
-                        </div>
-                        
-                        
-                    </div>
-                </div>
-            </div>
+        <div className="bg-base-100 rounded-lg p-2 shrink-0 text-center shadow-sm border border-base-300">
+          <h1 className="text-lg font-black truncate text-base-content">{batch.title}</h1>
         </div>
 
-        {/* --- Delete Modal  --- */}
-        <dialog id="delete_modal" className="modal">
-            <div className="modal-box">
-                <h3 className="font-bold text-lg">Confirm Deletion</h3>
-                <p className="py-4">Are you sure you want to delete this batch? This action cannot be undone.</p>
-                <div className="modal-action">
-                    <form method="dialog">
-                        <button className="btn mr-2">Cancel</button>
-                        <button className="btn btn-error" onClick={confirmDelete}>Delete</button>
-                    </form>
-                </div>
-            </div>
-             <form method="dialog" className="modal-backdrop">
-                <button>close</button>
-            </form>
-        </dialog>
-        
-        {/* --- Cancel Modal --- */}
-        <dialog id="cancel_modal" className="modal">
-            <div className="modal-box">
-                <h3 className="font-bold text-lg">Confirm Cancellation</h3>
-                <p className="py-4">Are you sure you want to cancel this batch? The process will be stopped.</p>
-                <div className="modal-action">
-                    <form method="dialog">
-                        <button className="btn mr-2" disabled={isCancelling}>Close</button>
-                        <button 
-                            className="btn btn-warning" 
-                            onClick={confirmCancel}
-                            disabled={isCancelling}
-                        >
-                            {isCancelling ? "Cancelling..." : "Yes, Cancel"}
-                        </button>
-                    </form>
-                </div>
-            </div>
-             <form method="dialog" className="modal-backdrop">
-                <button>close</button>
-            </form>
-        </dialog>
-        </>
-    );
+        <div className="flex-1 bg-base-100 rounded-lg p-2 flex flex-col justify-center items-center shadow-sm relative border border-base-300">
+          <label className="text-[10px] font-black uppercase text-base-content/40 mb-1 tracking-widest leading-none">Current Progress</label>
+          <div className="text-4xl font-black font-mono text-primary mb-2 leading-none">{batch.potsDoneCount} <span className="text-2xl text-base-content/30">/ {batch.outputCount}</span></div>
+          <progress className="progress progress-primary w-full h-4 bg-base-300 shadow-inner border border-base-300/50" value={progress} max="100"></progress>
+        </div>
+
+        <div className="flex gap-1.5 shrink-0 h-14">
+          <div className="flex-1 grid grid-cols-2 gap-1.5 bg-base-100 p-1.5 rounded-lg border border-base-300">
+             <SupplyStatus label="SOIL" level={machineState.soilLevel} />
+             <SupplyStatus label="CUPS" level={machineState.cupLevel} />
+          </div>
+          <div className="flex-1 flex items-center">
+            {['Ongoing', 'Paused'].includes(batch.status) ? (
+              <button onClick={() => setShowCancel(true)} className="btn btn-warning w-full h-full min-h-0 text-sm font-black shadow-md tracking-tighter active:scale-95"><XCircleIcon className="size-5 mr-1" /> STOP</button>
+            ) : machineState.activeBatchId?.toString() !== batch._id && (
+              <button onClick={() => setShowDelete(true)} className="btn btn-error w-full h-full min-h-0 text-sm font-black shadow-md text-error-content active:scale-95"><Trash2Icon className="size-5 mr-1" /> DELETE</button>
+            )}
+            {['Finished', 'Cancelled'].includes(batch.status) && machineState.activeBatchId?.toString() === batch._id && (
+               <button className="btn w-full h-full min-h-0 text-[10px] font-black" disabled>CLEANING...</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default BatchDetailPage;
