@@ -5,6 +5,8 @@ class MachineState {
         this.systemName = data.systemName || 'main';
         this.soilLevel = data.soilLevel !== undefined ? data.soilLevel : 1;
         this.cupLevel = data.cupLevel !== undefined ? data.cupLevel : 1;
+        this.seedLevel = data.seedLevel !== undefined ? data.seedLevel : 1;
+        this.cocoLevel = data.cocoLevel !== undefined ? data.cocoLevel : 1;
         // Handle "null" string or empty string as null
         this.activeBatchId = (data.activeBatchId === "null" || data.activeBatchId === "" || !data.activeBatchId) 
             ? null 
@@ -32,6 +34,8 @@ class MachineState {
             systemName: this.systemName,
             soilLevel: this.soilLevel,
             cupLevel: this.cupLevel,
+            seedLevel: this.seedLevel,
+            cocoLevel: this.cocoLevel,
             // Store null as "null" string in Firebase (or could use null directly)
             activeBatchId: this.activeBatchId || null,
             createdAt: this.createdAt,

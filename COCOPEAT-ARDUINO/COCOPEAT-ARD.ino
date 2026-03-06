@@ -8,6 +8,11 @@
 #define M2_PIN 5
 #define RPWM 8 
 #define LPWM 9
+#define SEED_CAP 20
+#define COCO_CAP 21
+
+int CUP_IR = 14;   // OUT → digital pin 14 (MH-B IR Sensor)
+
 const long stepsPer90Degrees = 50; 
 
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
@@ -22,6 +27,13 @@ String activeBatchId = "";
 bool isRunning = false;
 unsigned long lastStatusPrint = 0;
 const unsigned long STATUS_PRINT_INTERVAL = 30000; // Print status every 30 seconds
+int lastSensorState = LOW;  // Track previous sensor state to detect changes
+
+int seedLevel = 1;  // 1 = Sufficient, 0 = Low
+int cocoLevel = 1;  // 1 = Sufficient, 0 = Low
+int cupLevel = 1;   // 1 = Sufficient, 0 = Low (no cups available)
+unsigned long lastLevelUpdate = 0;
+const unsigned long LEVEL_UPDATE_INTERVAL = 3000; // Send level status every 3 seconds
 
 void setup() {
   Serial.begin(115200);  // For PC Monitor
@@ -32,6 +44,10 @@ void setup() {
   pinMode(M0_PIN, OUTPUT);
   pinMode(M1_PIN, OUTPUT);
   pinMode(M2_PIN, OUTPUT);
+  pinMode(SEED_CAP, INPUT);
+  pinMode(COCO_CAP, INPUT);
+  pinMode(CUP_IR, INPUT);
+
   servo.attach(11); 
   servo.write(83);   // Default position set to 83
   
@@ -42,7 +58,7 @@ void setup() {
   servo3.write(90);  // Stop position for continuous rotation servo
 
   servo4.attach(22);
-  servo4.write(90);  // Stop position for continuous rotation servo
+  servo4.write(115);  // Stop position for continuous rotation servo
 
   digitalWrite(M0_PIN, LOW);
   digitalWrite(M1_PIN, LOW);
@@ -58,24 +74,22 @@ void pourcup(){
   // Continuous rotation servo: 90=stop, <90=CW, >90=CCW
   
   // Rotate: servo3 clockwise, servo4 counter-clockwise
-  servo3.write(60);   // 90 - 25 = Clockwise
-  servo4.write(110);  // 90 + 25 = Counter-clockwise
-  delay(100);
+  servo3.write(115);   // 90 - 25 = Clockwise
+  servo4.write(90);  // 90 + 25 = Counter-clockwise
+  delay(2000);
   
   // Stop both servos
   servo3.write(90);  // Stop position
-  servo4.write(90);  // Stop position
+  servo4.write(115);  // Stop position
   delay(100);
 }
 void pourpeat(){
   // Move from 83 to 140
   servo.write(140);
-  delay(2000); // Wait at 140
-  
   // Start motor for 1 second
   analogWrite(RPWM, 255); // Full speed forward
   analogWrite(LPWM, 0);
-  delay(1000); // Run for 1 second
+  delay(300); // Run for 1 second
   
   // Stop motor
   analogWrite(RPWM, 0);
@@ -83,7 +97,7 @@ void pourpeat(){
   
   // Return back to default 83
   servo.write(83);
-  delay(2000); 
+  delay(1000); 
 }
 
 void pourseed(){
@@ -177,7 +191,58 @@ void parseReceivedData(String data) {
   }
 }
 
+void checkSupplyLevels() {
+  int seedSensor = digitalRead(SEED_CAP);
+  int cocoSensor = digitalRead(COCO_CAP);
+  int cupSensor = digitalRead(CUP_IR);
+  
+  // HIGH = Sufficient, LOW = Empty (for capacitive sensors)
+  seedLevel = (seedSensor == HIGH) ? 1 : 0;
+  cocoLevel = (cocoSensor == HIGH) ? 1 : 0;
+  
+  // For IR sensor: HIGH = hopper blocked/full, LOW = ready/available
+  cupLevel = (cupSensor == HIGH) ? 0 : 1;
+  
+  // If batch is running and any supply is low, stop the batch
+  if (isRunning && (seedLevel == 0 || cocoLevel == 0 || cupLevel == 0)) {
+    Serial.println("=== SUPPLY LOW - STOPPING BATCH ===");
+    if (seedLevel == 0) {
+      Serial.println("! SEED supply is LOW");
+    }
+    if (cocoLevel == 0) {
+      Serial.println("! COCOPEAT supply is LOW");
+    }
+    if (cupLevel == 0) {
+      Serial.println("! CUP supply is LOW (hopper blocked/full)");
+    }
+    
+    // Stop the batch
+    isRunning = false;
+    
+    // Notify ESP about supply shortage
+    Serial1.println("SUPPLY_LOW");
+    
+    Serial.println("✓ Batch stopped due to low supplies");
+  }
+  
+  // Send periodic status updates to ESP
+  unsigned long currentTime = millis();
+  if (currentTime - lastLevelUpdate >= LEVEL_UPDATE_INTERVAL) {
+    Serial1.print("LEVELS:");
+    Serial1.print(seedLevel);
+    Serial1.print(",");
+    Serial1.print(cocoLevel);
+    Serial1.print(",");
+    Serial1.println(cupLevel);
+    lastLevelUpdate = currentTime;
+  }
+}
+
 void loop() {
+  // Check supply levels
+  checkSupplyLevels();
+
+  
   // Always check for data from ESP (continuous listening)
   if (Serial1.available() > 0) {
     String receivedData = Serial1.readStringUntil('\n');

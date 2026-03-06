@@ -2,6 +2,8 @@
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 
+#define LJC_18A3_PIN D6  // Inductive proximity sensor
+
 #define WIFI_SSID "FTTH"
 #define WIFI_PASS "DALIA2025"
 
@@ -25,12 +27,15 @@ unsigned long lastStatusPrint = 0;
 const unsigned long STATUS_PRINT_INTERVAL = 30000; // Print status every 30 seconds when idle
 unsigned long lastHeartbeat = 0;
 const unsigned long HEARTBEAT_INTERVAL = 5000; // Update heartbeat every 5 seconds
+int lastSensorState = LOW;  // Track previous sensor state to detect changes
 
 void setup() {
   // ESP8266 hardware serial (TX/RX pins)
   // Match this baud rate with the Mega's Serial1 rate
   Serial.begin(115200); 
   delay(1000);
+  
+  pinMode(LJC_18A3_PIN, INPUT);  // Initialize proximity sensor
 
   Serial.println("\n\n=== COCOPEAT ESP8266 STARTING ===");
 
@@ -278,6 +283,49 @@ void checkArduinoResponse() {
       else if (response.startsWith("ACK_STOP")) {
         Serial.println("✓ Arduino acknowledged STOP command");
       }
+      else if (response.startsWith("SUPPLY_LOW")) {
+        Serial.println("⚠ SUPPLY LOW - Stopping batch");
+        
+        // Update batch status to Cancelled
+        if (activeBatchId.length() > 0 && Firebase.ready()) {
+          String statusPath = "/batches/" + activeBatchId + "/status";
+          Firebase.RTDB.setString(&fbdo, statusPath.c_str(), "Cancelled");
+          
+          // Clear active batch ID
+          Firebase.RTDB.setString(&fbdo, "/machineState/activeBatchId", "null");
+          
+          // Set device control to stopped
+          Firebase.RTDB.setBool(&fbdo, "/deviceControl/isRunning", false);
+          
+          Serial.println("✓ Batch cancelled due to low supplies");
+        }
+        
+        // Reset ESP state
+        isRunning = false;
+        previousRunningState = false;
+        activeBatchId = "";
+        outputCount = 0;
+        currentPotsDone = 0;
+      }
+      else if (response.startsWith("LEVELS:")) {
+        // Parse levels: "LEVELS:1,1,1" (seedLevel,cocoLevel,cupLevel)
+        String levelsData = response.substring(7);
+        int firstComma = levelsData.indexOf(',');
+        int secondComma = levelsData.indexOf(',', firstComma + 1);
+        
+        if (firstComma > 0 && secondComma > 0) {
+          int seedLevel = levelsData.substring(0, firstComma).toInt();
+          int cocoLevel = levelsData.substring(firstComma + 1, secondComma).toInt();
+          int cupLevel = levelsData.substring(secondComma + 1).toInt();
+          
+          // Update Firebase machine state
+          if (Firebase.ready()) {
+            Firebase.RTDB.setInt(&fbdo, "/machineState/seedLevel", seedLevel);
+            Firebase.RTDB.setInt(&fbdo, "/machineState/cocoLevel", cocoLevel);
+            Firebase.RTDB.setInt(&fbdo, "/machineState/cupLevel", cupLevel);
+          }
+        }
+      }
     }
   }
 }
@@ -352,6 +400,20 @@ void checkDeviceControl() {
 }
 
 void loop() {
+  // Check sensor state and only print/update on change
+  int sensorState = digitalRead(LJC_18A3_PIN);
+  if (sensorState != lastSensorState) {
+    Serial.print("Proximity Sensor: ");
+    Serial.println(sensorState == HIGH ? "NO OBJECT" : "OBJECT DETECTED");
+    
+    // Update sensor state in Firebase
+    if (Firebase.ready()) {
+      Firebase.RTDB.setBool(&fbdo, "/espStatus/proximityDetected", sensorState == LOW);
+    }
+    
+    lastSensorState = sensorState;
+  }
+  
   // Update heartbeat to show ESP is connected
   updateHeartbeat();
   
